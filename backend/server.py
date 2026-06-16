@@ -21,10 +21,9 @@ from fastapi.staticfiles import StaticFiles
 
 from llm import (
     ENV_LOADED_FROM,
-    ask_question,
+    ask_from_dialect,
     is_configured,
     log_llm_config,
-    translate_to_mandarin,
     translate_to_minnan,
 )
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -217,8 +216,7 @@ async def voice_chat(
         if not dialect_text:
             raise HTTPException(status_code=400, detail="未识别到语音内容，请重新录音")
 
-        mandarin_text = await translate_to_mandarin(dialect_text)
-        answer = await ask_question(mandarin_text, chat_history)
+        mandarin_text, answer = await ask_from_dialect(dialect_text, chat_history)
         answer_minnan = await translate_to_minnan(answer)
         total = time.time() - t0
 

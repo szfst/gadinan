@@ -100,8 +100,9 @@ async def translate_to_mandarin(dialect_text: str) -> str:
         {
             "role": "system",
             "content": (
-                "你是翻译助手。用户输入的是闽南语语音转写文本，"
-                "请将其准确翻译为标准普通话。只输出普通话翻译，不要解释。"
+                "你是精通闽南语（闽南话、河洛话、潮汕近缘方言）的翻译专家。"
+                "输入是闽南语语音识别转写，常有谐音字、同音别字，请按闽南语口语习惯还原原意，"
+                "输出标准普通话。只输出翻译结果，不要解释。"
             ),
         },
         {"role": "user", "content": dialect_text},
@@ -114,13 +115,66 @@ async def translate_to_minnan(mandarin_text: str) -> str:
         {
             "role": "system",
             "content": (
-                "你是闽南语翻译助手。请将以下内容翻译为闽南语（闽南话），"
-                "使用地道口语表达。只输出闽南语译文，不要解释，不要使用 Markdown 格式。"
+                "你是闽南语（闽南话）口语翻译专家，熟悉泉州、厦门、漳州腔。"
+                "将下文翻译为地道闽南语口语，用汉字书写（如「食」「佮」「恁」「啥物」），"
+                "避免书面文言文。只输出闽南语译文，不要 Markdown，不要解释。"
             ),
         },
         {"role": "user", "content": mandarin_text},
     ]
     return await _chat(messages)
+
+
+def _parse_tagged_response(raw: str) -> tuple[str, str]:
+    import re
+
+    match = re.search(r"<<<MANDARIN>>>\s*(.*?)\s*<<<ANSWER>>>\s*(.*)", raw, re.DOTALL)
+    if match:
+        return match.group(1).strip(), match.group(2).strip()
+
+    # 兼容旧格式
+    match2 = re.search(r"普通话[：:]\s*(.+?)\s*回答[：:]\s*(.+)", raw, re.DOTALL)
+    if match2:
+        return match2.group(1).strip(), match2.group(2).strip()
+
+    logger.warning("闽南语回复格式解析失败，回退为全文回答")
+    return "", raw.strip()
+
+
+async def ask_from_dialect(
+    dialect_text: str, history: list[dict] | None = None
+) -> tuple[str, str]:
+    """
+    一步完成：理解闽南语转写 + 生成普通话回答。
+    比「先翻译再问答」更少误差累积，DeepSeek 直接理解闽南语。
+    返回 (普通话理解, 回答)
+    """
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "你是精通闽南语（闽南话、河洛话）的语音助手。"
+                "用户用闽南话与你对话，输入是语音识别转写，常有谐音字、错别字或夹杂普通话，"
+                "请按闽南语语法和发音习惯理解真实意图，再结合对话历史回答。"
+                "严格按以下格式输出，不要输出标记以外的多余说明：\n"
+                "<<<MANDARIN>>>\n"
+                "（用户这句话的普通话含义）\n"
+                "<<<ANSWER>>>\n"
+                "（用简洁清晰的中文回答，可使用 Markdown）"
+            ),
+        },
+    ]
+    if history:
+        messages.extend(history[-20:])
+    messages.append({"role": "user", "content": dialect_text})
+
+    raw = await _chat(messages)
+    mandarin, answer = _parse_tagged_response(raw)
+    if not mandarin:
+        mandarin = await translate_to_mandarin(dialect_text)
+    if not answer:
+        answer = raw
+    return mandarin, answer
 
 
 async def ask_question(mandarin_text: str, history: list[dict] | None = None) -> str:

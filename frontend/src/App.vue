@@ -344,6 +344,7 @@ onUnmounted(() => {
       <section v-else-if="!isLoading && !isRecording" class="hint">
         <p v-if="!isSecure" class="warn">⚠️ 请使用 HTTPS 访问，手机才能录音。</p>
         <p>用闽南话提问，可多轮连续对话。</p>
+        <p class="tip">💡 闽南语识别技巧：语速稍慢、环境安静、一次说一句话；转写不准时 AI 会尽量从语境理解。</p>
       </section>
 
       <div v-if="errorMsg" class="error">{{ errorMsg }}</div>
@@ -641,5 +642,11 @@ onUnmounted(() => {
 .warn {
   color: #dc2626;
   font-weight: 500;
+}
+
+.tip {
+  font-size: 13px;
+  color: #667eea;
+  margin-top: 8px;
 }
 </style>
