@@ -13,15 +13,18 @@ from pathlib import Path
 from typing import Optional
 
 import uvicorn
-from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from llm import ask_question, is_configured, translate_to_mandarin
-
-load_dotenv(Path(__file__).parent.parent / ".env")
+from llm import (
+    ENV_LOADED_FROM,
+    ask_question,
+    is_configured,
+    log_llm_config,
+    translate_to_mandarin,
+)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -231,6 +234,7 @@ async def health():
         "ram_gb": round(ram_gb, 1) if ram_gb else None,
         "model_loaded": ASR_MODEL is not None,
         "llm_configured": is_configured(),
+        "env_file": ENV_LOADED_FROM,
         "dialect_support": ["minnan", "闽语", "闽南话"],
     }
 
@@ -255,6 +259,8 @@ def main():
 
     global DEVICE
     DEVICE = resolve_device(args.device)
+
+    log_llm_config()
 
     if args.preload:
         load_asr_model()

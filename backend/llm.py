@@ -1,29 +1,89 @@
+import logging
 import os
+from pathlib import Path
 
 import httpx
+from dotenv import load_dotenv
 
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
-DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+logger = logging.getLogger(__name__)
+
+ENV_LOADED_FROM: str | None = None
+
+
+def _mask_key(key: str) -> str:
+    if len(key) <= 8:
+        return "****"
+    return f"{key[:4]}...{key[-4:]}"
+
+
+def load_env() -> str | None:
+    """加载 .env，返回实际使用的文件路径。"""
+    global ENV_LOADED_FROM
+    backend_dir = Path(__file__).parent
+    for env_path in (backend_dir.parent / ".env", backend_dir / ".env"):
+        if env_path.is_file():
+            load_dotenv(env_path, override=True)
+            ENV_LOADED_FROM = str(env_path.resolve())
+            return ENV_LOADED_FROM
+    ENV_LOADED_FROM = None
+    return None
+
+
+def log_llm_config() -> None:
+    """启动时打印 DeepSeek 配置加载状态（Key 脱敏）。"""
+    env_path = ENV_LOADED_FROM or load_env()
+    api_key = _get_api_key()
+    model = _get_model()
+    base_url = _get_base_url()
+
+    if env_path:
+        logger.info("[DeepSeek] .env 已加载: %s", env_path)
+    else:
+        logger.warning("[DeepSeek] 未找到 .env 文件（请在项目根目录创建）")
+
+    if api_key:
+        logger.info(
+            "[DeepSeek] API Key 加载成功 ✓  key=%s  model=%s  base_url=%s",
+            _mask_key(api_key),
+            model,
+            base_url,
+        )
+    else:
+        logger.warning(
+            "[DeepSeek] API Key 未配置 ✗  请在 .env 中设置 DEEPSEEK_API_KEY=sk-..."
+        )
+
+
+def _get_api_key() -> str:
+    return os.getenv("DEEPSEEK_API_KEY", "").strip()
+
+
+def _get_base_url() -> str:
+    return os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
+
+
+def _get_model() -> str:
+    return os.getenv("DEEPSEEK_MODEL", "deepseek-chat").strip()
 
 
 def is_configured() -> bool:
-    return bool(DEEPSEEK_API_KEY)
+    return bool(_get_api_key())
 
 
 async def _chat(messages: list[dict]) -> str:
-    if not DEEPSEEK_API_KEY:
-        raise ValueError("未配置 DEEPSEEK_API_KEY，请在 .env 文件中设置")
+    api_key = _get_api_key()
+    if not api_key:
+        raise ValueError("未配置 DEEPSEEK_API_KEY，请在项目根目录 .env 文件中设置")
 
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(
-            f"{DEEPSEEK_BASE_URL}/v1/chat/completions",
+            f"{_get_base_url()}/v1/chat/completions",
             headers={
-                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
             json={
-                "model": DEEPSEEK_MODEL,
+                "model": _get_model(),
                 "messages": messages,
                 "stream": False,
             },
@@ -58,3 +118,7 @@ async def ask_question(mandarin_text: str) -> str:
         {"role": "user", "content": mandarin_text},
     ]
     return await _chat(messages)
+
+
+# 模块导入时加载 .env
+load_env()
