@@ -8,14 +8,17 @@ echo "========================================"
 echo "  拉取最新代码"
 echo "========================================"
 
-echo "[1/3] 撤销本地修改..."
+echo "[1/4] 撤销本地修改..."
 git checkout .
 
 echo "[2/3] 拉取远程代码..."
 git pull
 
-echo "[3/3] 设置启动脚本权限..."
-chmod +x ./start.sh
+echo "[3/4] 修复脚本换行符并设置权限..."
+sed -i 's/\r$//' ./start.sh ./pull.sh 2>/dev/null || true
+chmod +x ./start.sh ./pull.sh
+
+echo "[4/4] 完成"
 
 echo "========================================"
 echo "  完成，可执行 ./start.sh 启动服务"

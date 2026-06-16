@@ -66,7 +66,8 @@ pip install -q -r "$BACKEND_DIR/requirements.txt"
 # ---------- 前端构建 ----------
 echo "[3/4] 安装前端依赖并构建..."
 ensure_node
-cd "$FRONTEND_DIR"if [ ! -d "node_modules" ]; then
+cd "$FRONTEND_DIR"
+if [ ! -d "node_modules" ]; then
   npm install
 else
   echo "      node_modules 已存在，跳过 npm install"
