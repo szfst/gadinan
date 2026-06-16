@@ -29,10 +29,11 @@ fi
 
 echo "[2/4] 安装 Python 依赖（FunASR 1.x，CPU 版 PyTorch）..."
 # shellcheck disable=SC1091
-source "$VENV_DIR/bin/activate"pip install -q --upgrade pip
-# 仅安装 CPU 版 PyTorch，避免低配/无 GPU 机器下载 CUDA 大包
+source "$VENV_DIR/bin/activate"
+pip install -q --upgrade pip
 pip install -q torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 pip install -q -r "$BACKEND_DIR/requirements.txt"
+
 # ---------- 前端构建 ----------
 echo "[3/4] 安装前端依赖并构建..."
 cd "$FRONTEND_DIR"
