@@ -6,6 +6,35 @@ BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 VENV_DIR="$BACKEND_DIR/.venv"
 
+ensure_node() {
+  if command -v npm >/dev/null 2>&1; then
+    local major
+    major=$(node -v | sed 's/v//' | cut -d. -f1)
+    if [ "$major" -ge 18 ] 2>/dev/null; then
+      return 0
+    fi
+    echo "      Node.js 版本过低 ($(node -v))，需要 >= 18"
+  else
+    echo "      未找到 npm"
+  fi
+
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "      正在通过 NodeSource 安装 Node.js 20..."
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    apt-get install -y -qq nodejs
+  else
+    echo "错误: 请先安装 Node.js >= 18"
+    echo "      Debian/Ubuntu: curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt install -y nodejs"
+    exit 1
+  fi
+
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "错误: Node.js 安装失败，请手动安装后重试"
+    exit 1
+  fi
+  echo "      Node.js $(node -v) / npm $(npm -v) 就绪"
+}
+
 echo "========================================"
 echo "  闽南话语音识别 - 编译与启动"
 echo "========================================"
@@ -36,8 +65,8 @@ pip install -q -r "$BACKEND_DIR/requirements.txt"
 
 # ---------- 前端构建 ----------
 echo "[3/4] 安装前端依赖并构建..."
-cd "$FRONTEND_DIR"
-if [ ! -d "node_modules" ]; then
+ensure_node
+cd "$FRONTEND_DIR"if [ ! -d "node_modules" ]; then
   npm install
 else
   echo "      node_modules 已存在，跳过 npm install"
