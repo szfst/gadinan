@@ -15,8 +15,8 @@ echo "[2/3] 拉取远程代码..."
 git pull
 
 echo "[3/4] 修复脚本换行符并设置权限..."
-sed -i 's/\r$//' ./start.sh ./pull.sh 2>/dev/null || true
-chmod +x ./start.sh ./pull.sh
+sed -i 's/\r$//' ./start.sh ./pull.sh ./setup-ssl-ip.sh 2>/dev/null || true
+chmod +x ./start.sh ./pull.sh ./setup-ssl-ip.sh
 
 echo "[4/4] 完成"
 

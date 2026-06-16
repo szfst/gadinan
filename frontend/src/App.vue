@@ -73,12 +73,12 @@ async function startRecording() {
   answerText.value = ''
   stopSpeaking()
 
-  if (!navigator.mediaDevices?.getUserMedia) {
-    errorMsg.value = '当前浏览器不支持录音 API'
+  if (!isSecure) {
+    errorMsg.value = '请使用 HTTPS 访问（如 https://gardinan.xyz），手机浏览器在 HTTP 下无法录音'
     return
   }
-  if (!isSecure) {
-    errorMsg.value = '手机浏览器要求 HTTPS 才能录音，请用 https:// 域名访问，不要用 http://IP:8000'
+  if (!navigator.mediaDevices?.getUserMedia) {
+    errorMsg.value = '当前浏览器不支持录音，请用 Chrome / Safari 最新版访问'
     return
   }
   if (typeof MediaRecorder === 'undefined') {
