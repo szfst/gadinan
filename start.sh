@@ -11,8 +11,17 @@ echo "  闽南话语音识别 - 编译与启动"
 echo "========================================"
 
 # ---------- Python 虚拟环境 ----------
-if [ ! -d "$VENV_DIR" ]; then
-  echo "[1/4] 创建 Python 虚拟环境..."
+if [ ! -f "$VENV_DIR/bin/activate" ]; then
+  if [ -d "$VENV_DIR" ]; then
+    echo "[1/4] 虚拟环境不完整，正在重建..."
+    rm -rf "$VENV_DIR"
+  else
+    echo "[1/4] 创建 Python 虚拟环境..."
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "错误: 未找到 python3，请先安装: apt install python3 python3-venv python3-pip"
+    exit 1
+  fi
   python3 -m venv "$VENV_DIR"
 else
   echo "[1/4] Python 虚拟环境已存在，跳过创建"
@@ -20,8 +29,7 @@ fi
 
 echo "[2/4] 安装 Python 依赖（FunASR 1.x，CPU 版 PyTorch）..."
 # shellcheck disable=SC1091
-source "$VENV_DIR/bin/activate"
-pip install -q --upgrade pip
+source "$VENV_DIR/bin/activate"pip install -q --upgrade pip
 # 仅安装 CPU 版 PyTorch，避免低配/无 GPU 机器下载 CUDA 大包
 pip install -q torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 pip install -q -r "$BACKEND_DIR/requirements.txt"
@@ -46,6 +54,7 @@ HOST="${FUNASR_HOST:-0.0.0.0}"
 echo ""
 echo "  设备: $DEVICE（无 GPU 时自动使用 CPU）"
 echo "  地址: http://localhost:$PORT"
-echo "  首次识别会自动下载模型，CPU 模式下请耐心等待"echo "========================================"
+echo "  首次识别会自动下载模型，CPU 模式下请耐心等待"
+echo "========================================"
 
-exec python server.py --host "$HOST" --port "$PORT" --device "$DEVICE" --preload
+exec "$VENV_DIR/bin/python" server.py --host "$HOST" --port "$PORT" --device "$DEVICE" --preload
