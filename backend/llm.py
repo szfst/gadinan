@@ -115,7 +115,7 @@ async def translate_to_minnan(mandarin_text: str) -> str:
             "role": "system",
             "content": (
                 "你是闽南语翻译助手。请将以下内容翻译为闽南语（闽南话），"
-                "使用地道口语表达。只输出闽南语译文，不要解释。"
+                "使用地道口语表达。只输出闽南语译文，不要解释，不要使用 Markdown 格式。"
             ),
         },
         {"role": "user", "content": mandarin_text},
@@ -129,7 +129,8 @@ async def ask_question(mandarin_text: str, history: list[dict] | None = None) ->
             "role": "system",
             "content": (
                 "你是一个有帮助的 AI 助手。请用简洁清晰的中文回答用户的问题。"
-                "用户可能连续多轮提问，请结合上下文理解，例如「它」「那个」「刚才说的」等指代。"
+                "用户可能连续多轮提问，请结合上下文理解。"
+                "回答请使用 Markdown 格式（标题、列表、加粗等），让内容结构清晰。"
             ),
         },
     ]

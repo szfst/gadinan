@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { renderMarkdown, stripMarkdown } from './utils/text.js'
 
 const isRecording = ref(false)
 const isLoading = ref(false)
@@ -8,7 +9,7 @@ const errorMsg = ref('')
 const recordDuration = ref(0)
 const turns = ref([])
 const chatHistory = ref([])
-const speakingId = ref(null)
+const speakingKey = ref(null)
 const speakError = ref('')
 const chatListRef = ref(null)
 
@@ -30,11 +31,7 @@ const statusText = computed(() => {
 
 function getRecorderOptions() {
   const types = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/mp4',
-    'audio/aac',
-    'audio/ogg;codecs=opus',
+    'audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac', 'audio/ogg;codecs=opus',
   ]
   for (const mimeType of types) {
     if (MediaRecorder.isTypeSupported(mimeType)) return { mimeType }
@@ -195,22 +192,35 @@ function loadVoices() {
   return synth.getVoices()
 }
 
-function pickMinnanVoice() {
+function pickVoice(lang) {
   const voices = loadVoices()
+  if (lang === 'minnan') {
+    const rules = [
+      (v) => v.lang === 'nan-TW' || v.lang === 'nan-CN' || v.lang === 'nan',
+      (v) => /minnan|闽南|潮州|台语|台湾/i.test(v.name),
+      (v) => v.lang.startsWith('zh-TW'),
+    ]
+    for (const rule of rules) {
+      const voice = voices.find(rule)
+      if (voice) return { voice, lang: voice.lang }
+    }
+    return { voice: null, lang: 'zh-TW' }
+  }
   const rules = [
-    (v) => v.lang === 'nan-TW' || v.lang === 'nan-CN' || v.lang === 'nan',
-    (v) => v.lang.startsWith('zh-TW') || /taiwan|台|闽|nan/i.test(v.name),
+    (v) => v.lang === 'zh-CN',
+    (v) => v.lang.startsWith('zh') && !v.lang.startsWith('zh-TW'),
     (v) => v.lang.startsWith('zh'),
   ]
   for (const rule of rules) {
     const voice = voices.find(rule)
-    if (voice) return voice
+    if (voice) return { voice, lang: voice.lang }
   }
-  return voices[0] || null
+  return { voice: voices[0] || null, lang: 'zh-CN' }
 }
 
-function speak(text, turnId) {
+function speak(rawText, turnId, lang) {
   speakError.value = ''
+  const text = stripMarkdown(rawText)
   if (!text) {
     speakError.value = '没有可朗读的内容'
     return
@@ -220,23 +230,25 @@ function speak(text, turnId) {
     return
   }
 
+  const key = `${turnId}-${lang}`
+  if (speakingKey.value === key) {
+    stopSpeaking()
+    return
+  }
+
   stopSpeaking()
 
   const start = () => {
     const utterance = new SpeechSynthesisUtterance(text)
-    const voice = pickMinnanVoice()
-    if (voice) {
-      utterance.voice = voice
-      utterance.lang = voice.lang
-    } else {
-      utterance.lang = 'nan-TW'
-    }
-    utterance.rate = 0.95
+    const { voice, lang: utterLang } = pickVoice(lang)
+    utterance.lang = utterLang
+    if (voice) utterance.voice = voice
+    utterance.rate = lang === 'minnan' ? 0.9 : 1
 
-    utterance.onstart = () => { speakingId.value = turnId }
-    utterance.onend = () => { speakingId.value = null }
+    utterance.onstart = () => { speakingKey.value = key }
+    utterance.onend = () => { speakingKey.value = null }
     utterance.onerror = (e) => {
-      speakingId.value = null
+      speakingKey.value = null
       speakError.value = `朗读失败（${e.error || 'unknown'}）`
     }
 
@@ -259,13 +271,12 @@ function speak(text, turnId) {
 function stopSpeaking() {
   if (synth) {
     synth.cancel()
-    speakingId.value = null
+    speakingKey.value = null
   }
 }
 
-function toggleSpeak(turn) {
-  if (speakingId.value === turn.id) stopSpeaking()
-  else speak(turn.answerMinnan, turn.id)
+function isSpeaking(turnId, lang) {
+  return speakingKey.value === `${turnId}-${lang}`
 }
 
 onMounted(() => {
@@ -285,7 +296,7 @@ onUnmounted(() => {
   <div class="container">
     <header class="header">
       <h1>闽南话语音助手</h1>
-      <p class="subtitle">连续对话 · 闽南语说 · 普通话理解 · 闽南语朗读</p>
+      <p class="subtitle">连续对话 · Markdown 展示 · 普通话 / 闽南语朗读</p>
     </header>
 
     <main class="card">
@@ -304,16 +315,27 @@ onUnmounted(() => {
           <div class="bubble ai-bubble">
             <div class="ai-header">
               <span>AI 回答</span>
-              <button
-                class="speak-btn"
-                :class="{ active: speakingId === turn.id }"
-                @click="toggleSpeak(turn)"
-              >
-                {{ speakingId === turn.id ? '🔇 停止' : '🔊 朗读' }}
-              </button>
+              <div class="speak-group">
+                <button
+                  class="speak-btn mandarin"
+                  :class="{ active: isSpeaking(turn.id, 'mandarin') }"
+                  @click="speak(turn.answer, turn.id, 'mandarin')"
+                >
+                  {{ isSpeaking(turn.id, 'mandarin') ? '🔇' : '🔊' }} 普通话
+                </button>
+                <button
+                  class="speak-btn minnan"
+                  :class="{ active: isSpeaking(turn.id, 'minnan') }"
+                  @click="speak(turn.answerMinnan, turn.id, 'minnan')"
+                >
+                  {{ isSpeaking(turn.id, 'minnan') ? '🔇' : '🔊' }} 闽南语
+                </button>
+              </div>
             </div>
-            <p class="answer-text" @click="toggleSpeak(turn)">{{ turn.answer }}</p>
-            <p v-if="turn.answerMinnan" class="answer-minnan">闽南语：{{ turn.answerMinnan }}</p>
+            <div class="markdown-body" v-html="renderMarkdown(turn.answer)" />
+            <p v-if="turn.answerMinnan" class="answer-minnan">
+              <span>闽南语版</span>{{ turn.answerMinnan }}
+            </p>
           </div>
         </div>
       </div>
@@ -321,7 +343,6 @@ onUnmounted(() => {
       <section v-else-if="!isLoading && !isRecording" class="hint">
         <p v-if="!isSecure" class="warn">⚠️ 请使用 HTTPS 访问，手机才能录音。</p>
         <p>用闽南话提问，可多轮连续对话。</p>
-        <p>例如先问「厦门有什么好玩？」，再说「那美食呢？」</p>
       </section>
 
       <div v-if="errorMsg" class="error">{{ errorMsg }}</div>
@@ -407,9 +428,7 @@ onUnmounted(() => {
   padding-right: 4px;
 }
 
-.turn {
-  margin-bottom: 20px;
-}
+.turn { margin-bottom: 20px; }
 
 .turn-label {
   font-size: 12px;
@@ -424,14 +443,8 @@ onUnmounted(() => {
   margin-bottom: 8px;
 }
 
-.user-bubble {
-  background: #f0f4ff;
-}
-
-.ai-bubble {
-  background: #f8f9ff;
-  border: 1px solid #e8ebff;
-}
+.user-bubble { background: #f0f4ff; }
+.ai-bubble { background: #f8f9ff; border: 1px solid #e8ebff; }
 
 .dialect-line,
 .mandarin-line {
@@ -464,38 +477,111 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  gap: 8px;
+  margin-bottom: 10px;
   font-size: 12px;
   color: #888;
 }
 
+.speak-group {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .speak-btn {
-  padding: 4px 12px;
-  font-size: 12px;
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.speak-btn.mandarin {
   border: 1px solid #667eea;
   background: #fff;
   color: #667eea;
-  border-radius: 16px;
-  cursor: pointer;
 }
 
-.speak-btn.active {
+.speak-btn.minnan {
+  border: 1px solid #e67e22;
+  background: #fff;
+  color: #e67e22;
+}
+
+.speak-btn.mandarin.active {
   background: #667eea;
   color: #fff;
 }
 
-.answer-text {
-  font-size: 16px;
+.speak-btn.minnan.active {
+  background: #e67e22;
+  color: #fff;
+}
+
+.markdown-body {
+  font-size: 15px;
   line-height: 1.7;
   color: #222;
-  cursor: pointer;
+  word-break: break-word;
+}
+
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3) {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 12px 0 6px;
+}
+
+.markdown-body :deep(p) {
+  margin: 6px 0;
+}
+
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.markdown-body :deep(li) {
+  margin: 4px 0;
+}
+
+.markdown-body :deep(strong) {
+  font-weight: 700;
+  color: #111;
+}
+
+.markdown-body :deep(code) {
+  background: #eef1ff;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.markdown-body :deep(pre) {
+  background: #f4f4f5;
+  padding: 10px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 13px;
 }
 
 .answer-minnan {
-  margin-top: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed #dde1ff;
   font-size: 14px;
-  color: #667eea;
+  color: #e67e22;
   line-height: 1.6;
+}
+
+.answer-minnan span {
+  display: block;
+  font-size: 11px;
+  color: #999;
+  margin-bottom: 4px;
 }
 
 .record-btn {
