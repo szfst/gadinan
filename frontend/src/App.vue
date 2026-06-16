@@ -1,27 +1,31 @@
 <script setup>
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 
 const isRecording = ref(false)
 const isLoading = ref(false)
 const loadingStep = ref('')
 const errorMsg = ref('')
 const recordDuration = ref(0)
-const dialectText = ref('')
-const mandarinText = ref('')
-const answerText = ref('')
-const isSpeaking = ref(false)
+const turns = ref([])
+const chatHistory = ref([])
+const speakingId = ref(null)
+const speakError = ref('')
+const chatListRef = ref(null)
 
 let mediaRecorder = null
 let audioChunks = []
 let durationTimer = null
+let voicesReady = false
 
+const synth = typeof window !== 'undefined' ? window.speechSynthesis : null
 const isSecure = window.isSecureContext
 
 const statusText = computed(() => {
   if (!isSecure) return '需要 HTTPS 才能使用麦克风'
   if (loadingStep.value) return loadingStep.value
   if (isRecording.value) return `录音中 ${recordDuration.value}s`
-  return '点击按钮，用闽南语提问'
+  if (turns.value.length) return '继续说话，AI 会记住上下文'
+  return '点击按钮，用闽南语开始对话'
 })
 
 function getRecorderOptions() {
@@ -33,9 +37,7 @@ function getRecorderOptions() {
     'audio/ogg;codecs=opus',
   ]
   for (const mimeType of types) {
-    if (MediaRecorder.isTypeSupported(mimeType)) {
-      return { mimeType }
-    }
+    if (MediaRecorder.isTypeSupported(mimeType)) return { mimeType }
   }
   return undefined
 }
@@ -66,15 +68,20 @@ function describeMicError(err) {
   return `录音失败：${err?.message || '未知错误'}`
 }
 
+async function scrollToBottom() {
+  await nextTick()
+  if (chatListRef.value) {
+    chatListRef.value.scrollTop = chatListRef.value.scrollHeight
+  }
+}
+
 async function startRecording() {
   errorMsg.value = ''
-  dialectText.value = ''
-  mandarinText.value = ''
-  answerText.value = ''
+  speakError.value = ''
   stopSpeaking()
 
   if (!isSecure) {
-    errorMsg.value = '请使用 HTTPS 访问（如 https://gardinan.xyz），手机浏览器在 HTTP 下无法录音'
+    errorMsg.value = '请使用 HTTPS 访问，手机浏览器在 HTTP 下无法录音'
     return
   }
   if (!navigator.mediaDevices?.getUserMedia) {
@@ -88,10 +95,7 @@ async function startRecording() {
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-      },
+      audio: { echoCancellation: true, noiseSuppression: true },
     })
     mediaRecorder = createMediaRecorder(stream)
     audioChunks = []
@@ -118,7 +122,6 @@ async function startRecording() {
       sendVoiceChat(new Blob(audioChunks, { type: mimeType }))
     }
 
-    // iOS 需要 timeslice 才能稳定产生数据
     mediaRecorder.start(1000)
     isRecording.value = true
     recordDuration.value = 0
@@ -137,37 +140,48 @@ function stopRecording() {
 }
 
 function toggleRecording() {
-  if (isRecording.value) {
-    stopRecording()
-  } else if (!isLoading.value) {
-    startRecording()
-  }
+  if (isRecording.value) stopRecording()
+  else if (!isLoading.value) startRecording()
+}
+
+function newConversation() {
+  stopSpeaking()
+  turns.value = []
+  chatHistory.value = []
+  errorMsg.value = ''
+  speakError.value = ''
 }
 
 async function sendVoiceChat(blob) {
   isLoading.value = true
-  loadingStep.value = '正在识别闽南语...'
+  loadingStep.value = '正在识别并思考...'
   errorMsg.value = ''
 
   const ext = blob.type.includes('mp4') || blob.type.includes('aac')
     ? 'm4a'
-    : blob.type.includes('ogg')
-      ? 'ogg'
-      : 'webm'
+    : blob.type.includes('ogg') ? 'ogg' : 'webm'
   const formData = new FormData()
   formData.append('file', blob, `recording.${ext}`)
+  formData.append('history', JSON.stringify(chatHistory.value))
 
   try {
     const res = await fetch('/api/voice-chat', { method: 'POST', body: formData })
     const data = await res.json()
     if (!res.ok) throw new Error(data.detail || '处理失败')
 
-    dialectText.value = data.dialect_text
-    mandarinText.value = data.mandarin_text
-    answerText.value = data.answer
-    console.log('闽南语:', data.dialect_text)
-    console.log('普通话:', data.mandarin_text)
-    console.log('回答:', data.answer)
+    const turn = {
+      id: Date.now(),
+      dialect: data.dialect_text,
+      mandarin: data.mandarin_text,
+      answer: data.answer,
+      answerMinnan: data.answer_minnan || data.answer,
+    }
+    turns.value.push(turn)
+
+    chatHistory.value.push({ role: 'user', content: data.mandarin_text })
+    chatHistory.value.push({ role: 'assistant', content: data.answer })
+
+    await scrollToBottom()
   } catch (err) {
     errorMsg.value = err.message || '请求失败，请确认服务已启动且已配置 DeepSeek Key'
   } finally {
@@ -176,33 +190,90 @@ async function sendVoiceChat(blob) {
   }
 }
 
-function speak(text) {
-  if (!text || !window.speechSynthesis) return
+function loadVoices() {
+  if (!synth) return []
+  return synth.getVoices()
+}
+
+function pickMinnanVoice() {
+  const voices = loadVoices()
+  const rules = [
+    (v) => v.lang === 'nan-TW' || v.lang === 'nan-CN' || v.lang === 'nan',
+    (v) => v.lang.startsWith('zh-TW') || /taiwan|台|闽|nan/i.test(v.name),
+    (v) => v.lang.startsWith('zh'),
+  ]
+  for (const rule of rules) {
+    const voice = voices.find(rule)
+    if (voice) return voice
+  }
+  return voices[0] || null
+}
+
+function speak(text, turnId) {
+  speakError.value = ''
+  if (!text) {
+    speakError.value = '没有可朗读的内容'
+    return
+  }
+  if (!synth) {
+    speakError.value = '当前浏览器不支持语音朗读'
+    return
+  }
 
   stopSpeaking()
-  const utterance = new SpeechSynthesisUtterance(text)
-  utterance.lang = 'zh-CN'
-  utterance.rate = 1
-  utterance.onstart = () => { isSpeaking.value = true }
-  utterance.onend = () => { isSpeaking.value = false }
-  utterance.onerror = () => { isSpeaking.value = false }
-  window.speechSynthesis.speak(utterance)
+
+  const start = () => {
+    const utterance = new SpeechSynthesisUtterance(text)
+    const voice = pickMinnanVoice()
+    if (voice) {
+      utterance.voice = voice
+      utterance.lang = voice.lang
+    } else {
+      utterance.lang = 'nan-TW'
+    }
+    utterance.rate = 0.95
+
+    utterance.onstart = () => { speakingId.value = turnId }
+    utterance.onend = () => { speakingId.value = null }
+    utterance.onerror = (e) => {
+      speakingId.value = null
+      speakError.value = `朗读失败（${e.error || 'unknown'}）`
+    }
+
+    synth.resume()
+    synth.speak(utterance)
+  }
+
+  if (loadVoices().length > 0 || voicesReady) start()
+  else {
+    synth.onvoiceschanged = () => {
+      voicesReady = true
+      synth.onvoiceschanged = null
+      start()
+    }
+    loadVoices()
+    setTimeout(start, 300)
+  }
 }
 
 function stopSpeaking() {
-  if (window.speechSynthesis) {
-    window.speechSynthesis.cancel()
-    isSpeaking.value = false
+  if (synth) {
+    synth.cancel()
+    speakingId.value = null
   }
 }
 
-function toggleSpeak() {
-  if (isSpeaking.value) {
-    stopSpeaking()
-  } else {
-    speak(answerText.value)
-  }
+function toggleSpeak(turn) {
+  if (speakingId.value === turn.id) stopSpeaking()
+  else speak(turn.answerMinnan, turn.id)
 }
+
+onMounted(() => {
+  if (synth) {
+    loadVoices()
+    synth.onvoiceschanged = () => { voicesReady = true }
+  }
+})
 
 onUnmounted(() => {
   stopSpeaking()
@@ -214,11 +285,47 @@ onUnmounted(() => {
   <div class="container">
     <header class="header">
       <h1>闽南话语音助手</h1>
-      <p class="subtitle">闽南语说话 → 普通话翻译 → DeepSeek 智能回答</p>
+      <p class="subtitle">连续对话 · 闽南语说 · 普通话理解 · 闽南语朗读</p>
     </header>
 
     <main class="card">
-      <div class="status">{{ statusText }}</div>
+      <div class="toolbar">
+        <span class="status">{{ statusText }}</span>
+        <button v-if="turns.length" class="new-chat-btn" @click="newConversation">新对话</button>
+      </div>
+
+      <div v-if="turns.length" ref="chatListRef" class="chat-list">
+        <div v-for="(turn, i) in turns" :key="turn.id" class="turn">
+          <div class="turn-label">第 {{ i + 1 }} 轮</div>
+          <div class="bubble user-bubble">
+            <p v-if="turn.dialect" class="dialect-line"><span>闽南语</span>{{ turn.dialect }}</p>
+            <p class="mandarin-line"><span>普通话</span>{{ turn.mandarin }}</p>
+          </div>
+          <div class="bubble ai-bubble">
+            <div class="ai-header">
+              <span>AI 回答</span>
+              <button
+                class="speak-btn"
+                :class="{ active: speakingId === turn.id }"
+                @click="toggleSpeak(turn)"
+              >
+                {{ speakingId === turn.id ? '🔇 停止' : '🔊 朗读' }}
+              </button>
+            </div>
+            <p class="answer-text" @click="toggleSpeak(turn)">{{ turn.answer }}</p>
+            <p v-if="turn.answerMinnan" class="answer-minnan">闽南语：{{ turn.answerMinnan }}</p>
+          </div>
+        </div>
+      </div>
+
+      <section v-else-if="!isLoading && !isRecording" class="hint">
+        <p v-if="!isSecure" class="warn">⚠️ 请使用 HTTPS 访问，手机才能录音。</p>
+        <p>用闽南话提问，可多轮连续对话。</p>
+        <p>例如先问「厦门有什么好玩？」，再说「那美食呢？」</p>
+      </section>
+
+      <div v-if="errorMsg" class="error">{{ errorMsg }}</div>
+      <div v-if="speakError" class="speak-error">{{ speakError }}</div>
 
       <button
         class="record-btn"
@@ -227,37 +334,8 @@ onUnmounted(() => {
         @click="toggleRecording"
       >
         <span class="icon">{{ isRecording ? '⏹' : '🎤' }}</span>
-        <span>{{ isRecording ? '停止并发送' : isLoading ? '处理中...' : '开始录音提问' }}</span>
+        <span>{{ isRecording ? '停止并发送' : isLoading ? '处理中...' : turns.length ? '继续说话' : '开始录音' }}</span>
       </button>
-
-      <div v-if="errorMsg" class="error">{{ errorMsg }}</div>
-
-      <section v-if="dialectText" class="block">
-        <h2>闽南语转写</h2>
-        <p class="text dialect">{{ dialectText }}</p>
-      </section>
-
-      <section v-if="mandarinText" class="block">
-        <h2>普通话翻译</h2>
-        <p class="text mandarin">{{ mandarinText }}</p>
-      </section>
-
-      <section v-if="answerText" class="block answer-block">
-        <div class="answer-header">
-          <h2>AI 回答</h2>
-          <button class="speak-btn" :class="{ active: isSpeaking }" @click="toggleSpeak">
-            {{ isSpeaking ? '🔇 停止' : '🔊 朗读' }}
-          </button>
-        </div>
-        <p class="text answer" @click="toggleSpeak">{{ answerText }}</p>
-        <p class="speak-hint">点击回答文字也可朗读</p>
-      </section>
-
-      <section v-if="!dialectText && !isLoading && !isRecording" class="hint">
-        <p v-if="!isSecure" class="warn">⚠️ 当前为 HTTP 访问，手机无法录音。请配置 HTTPS 后访问。</p>
-        <p>用闽南话提问，例如：「今天天气怎么样？」</p>
-        <p>系统会自动翻译为普通话，并调用 DeepSeek 回答。</p>
-      </section>
     </main>
   </div>
 </template>
@@ -266,38 +344,158 @@ onUnmounted(() => {
 .container {
   max-width: 640px;
   margin: 0 auto;
-  padding: 40px 20px;
+  padding: 24px 16px 40px;
 }
 
 .header {
   text-align: center;
   color: #fff;
-  margin-bottom: 32px;
+  margin-bottom: 20px;
 }
 
 .header h1 {
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 700;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .subtitle {
-  font-size: 14px;
+  font-size: 13px;
   opacity: 0.85;
 }
 
 .card {
   background: #fff;
   border-radius: 16px;
-  padding: 32px 24px;
+  padding: 20px 16px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 140px);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
 .status {
-  text-align: center;
+  flex: 1;
   color: #666;
-  font-size: 15px;
-  margin-bottom: 24px;
+  font-size: 14px;
+}
+
+.new-chat-btn {
+  padding: 4px 12px;
+  font-size: 13px;
+  border: 1px solid #ddd;
+  background: #fff;
+  border-radius: 16px;
+  cursor: pointer;
+  color: #666;
+  white-space: nowrap;
+}
+
+.chat-list {
+  flex: 1;
+  overflow-y: auto;
+  margin-bottom: 16px;
+  max-height: 55vh;
+  padding-right: 4px;
+}
+
+.turn {
+  margin-bottom: 20px;
+}
+
+.turn-label {
+  font-size: 12px;
+  color: #aaa;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.bubble {
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+
+.user-bubble {
+  background: #f0f4ff;
+}
+
+.ai-bubble {
+  background: #f8f9ff;
+  border: 1px solid #e8ebff;
+}
+
+.dialect-line,
+.mandarin-line {
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.dialect-line {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 6px;
+}
+
+.mandarin-line {
+  font-size: 16px;
+  color: #1a1a1a;
+  font-weight: 500;
+}
+
+.dialect-line span,
+.mandarin-line span {
+  display: inline-block;
+  font-size: 11px;
+  color: #999;
+  margin-right: 6px;
+  min-width: 42px;
+}
+
+.ai-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #888;
+}
+
+.speak-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  border: 1px solid #667eea;
+  background: #fff;
+  color: #667eea;
+  border-radius: 16px;
+  cursor: pointer;
+}
+
+.speak-btn.active {
+  background: #667eea;
+  color: #fff;
+}
+
+.answer-text {
+  font-size: 16px;
+  line-height: 1.7;
+  color: #222;
+  cursor: pointer;
+}
+
+.answer-minnan {
+  margin-top: 8px;
+  font-size: 14px;
+  color: #667eea;
+  line-height: 1.6;
 }
 
 .record-btn {
@@ -307,18 +505,14 @@ onUnmounted(() => {
   gap: 10px;
   width: 100%;
   padding: 16px;
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 600;
   color: #fff;
   background: linear-gradient(135deg, #667eea, #764ba2);
   border: none;
   border-radius: 12px;
   cursor: pointer;
-  transition: transform 0.15s, opacity 0.15s;
-}
-
-.record-btn:hover:not(:disabled) {
-  transform: scale(1.02);
+  flex-shrink: 0;
 }
 
 .record-btn:disabled {
@@ -331,115 +525,34 @@ onUnmounted(() => {
   animation: pulse 1.5s infinite;
 }
 
-.icon {
-  font-size: 24px;
-}
+.icon { font-size: 22px; }
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.7; }
 }
 
-.error {
-  margin-top: 16px;
-  padding: 12px;
+.error,
+.speak-error {
+  margin-bottom: 12px;
+  padding: 10px;
   background: #fef2f2;
   color: #dc2626;
   border-radius: 8px;
-  font-size: 14px;
-  text-align: center;
-}
-
-.block {
-  margin-top: 24px;
-  padding-top: 20px;
-  border-top: 1px solid #eee;
-}
-
-.block h2 {
-  font-size: 14px;
-  color: #888;
-  margin-bottom: 10px;
-  font-weight: 600;
-}
-
-.text {
-  line-height: 1.7;
-  word-break: break-word;
-}
-
-.dialect {
-  font-size: 16px;
-  color: #666;
-}
-
-.mandarin {
-  font-size: 20px;
-  color: #1a1a1a;
-  font-weight: 500;
-}
-
-.answer-block {
-  background: #f8f9ff;
-  margin-left: -24px;
-  margin-right: -24px;
-  padding: 20px 24px 24px;
-  border-top: none;
-  border-radius: 0 0 16px 16px;
-}
-
-.answer-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-
-.answer-header h2 {
-  margin-bottom: 0;
-}
-
-.speak-btn {
-  padding: 6px 14px;
   font-size: 13px;
-  border: 1px solid #667eea;
-  background: #fff;
-  color: #667eea;
-  border-radius: 20px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.speak-btn:hover,
-.speak-btn.active {
-  background: #667eea;
-  color: #fff;
-}
-
-.answer {
-  font-size: 18px;
-  color: #222;
-  cursor: pointer;
-}
-
-.speak-hint {
-  margin-top: 8px;
-  font-size: 12px;
-  color: #aaa;
   text-align: center;
 }
 
 .hint {
-  margin-top: 24px;
   text-align: center;
   color: #999;
   font-size: 14px;
   line-height: 1.8;
+  margin-bottom: 16px;
 }
 
 .warn {
   color: #dc2626;
   font-weight: 500;
-  margin-bottom: 8px;
 }
 </style>

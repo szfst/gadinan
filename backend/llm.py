@@ -109,14 +109,33 @@ async def translate_to_mandarin(dialect_text: str) -> str:
     return await _chat(messages)
 
 
-async def ask_question(mandarin_text: str) -> str:
+async def translate_to_minnan(mandarin_text: str) -> str:
     messages = [
         {
             "role": "system",
-            "content": "你是一个有帮助的 AI 助手。请用简洁清晰的中文回答用户的问题。",
+            "content": (
+                "你是闽南语翻译助手。请将以下内容翻译为闽南语（闽南话），"
+                "使用地道口语表达。只输出闽南语译文，不要解释。"
+            ),
         },
         {"role": "user", "content": mandarin_text},
     ]
+    return await _chat(messages)
+
+
+async def ask_question(mandarin_text: str, history: list[dict] | None = None) -> str:
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "你是一个有帮助的 AI 助手。请用简洁清晰的中文回答用户的问题。"
+                "用户可能连续多轮提问，请结合上下文理解，例如「它」「那个」「刚才说的」等指代。"
+            ),
+        },
+    ]
+    if history:
+        messages.extend(history[-20:])
+    messages.append({"role": "user", "content": mandarin_text})
     return await _chat(messages)
 
 

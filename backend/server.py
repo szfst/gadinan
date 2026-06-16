@@ -4,6 +4,7 @@
 """
 
 import argparse
+import json
 import logging
 import os
 import re
@@ -24,6 +25,7 @@ from llm import (
     is_configured,
     log_llm_config,
     translate_to_mandarin,
+    translate_to_minnan,
 )
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -184,16 +186,27 @@ async def transcribe(
 
 
 @app.post("/api/voice-chat")
-async def voice_chat(file: UploadFile = File(...)):
+async def voice_chat(
+    file: UploadFile = File(...),
+    history: Optional[str] = Form(default="[]"),
+):
     """
-    完整语音对话流程：
+    完整语音对话流程（支持多轮上下文）：
     闽南语语音 → 转写 → 翻译普通话 → DeepSeek 回答
+    history: JSON 数组，如 [{"role":"user","content":"..."},{"role":"assistant","content":"..."}]
     """
     if not is_configured():
         raise HTTPException(
             status_code=503,
             detail="未配置 DEEPSEEK_API_KEY，请复制 .env.example 为 .env 并填入 Key",
         )
+
+    try:
+        chat_history = json.loads(history or "[]")
+        if not isinstance(chat_history, list):
+            raise ValueError("history 必须是数组")
+    except (json.JSONDecodeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=f"history 格式错误: {e}") from e
 
     suffix = os.path.splitext(file.filename or "audio.webm")[1] or ".webm"
     content = await file.read()
@@ -205,7 +218,8 @@ async def voice_chat(file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail="未识别到语音内容，请重新录音")
 
         mandarin_text = await translate_to_mandarin(dialect_text)
-        answer = await ask_question(mandarin_text)
+        answer = await ask_question(mandarin_text, chat_history)
+        answer_minnan = await translate_to_minnan(answer)
         total = time.time() - t0
 
         return JSONResponse(
@@ -213,8 +227,10 @@ async def voice_chat(file: UploadFile = File(...)):
                 "dialect_text": dialect_text,
                 "mandarin_text": mandarin_text,
                 "answer": answer,
+                "answer_minnan": answer_minnan,
                 "asr_duration": round(asr_duration, 3),
                 "total_duration": round(total, 3),
+                "history_length": len(chat_history),
             }
         )
     except HTTPException:
