@@ -78,14 +78,20 @@ npm run build
 echo "[4/4] 启动后端服务..."
 cd "$BACKEND_DIR"
 
+if [ ! -f "$ROOT_DIR/.env" ]; then
+  echo ""
+  echo "  提示: 未找到 .env 文件，DeepSeek 对话功能不可用"
+  echo "        cp .env.example .env  并填入 DEEPSEEK_API_KEY"
+fi
+
 DEVICE="${FUNASR_DEVICE:-auto}"
 PORT="${FUNASR_PORT:-8000}"
 HOST="${FUNASR_HOST:-0.0.0.0}"
 
 echo ""
 echo "  设备: $DEVICE（无 GPU 时自动使用 CPU）"
+echo "  语音模型: ${FUNASR_ASR_MODEL:-fun-asr-nano}"
 echo "  地址: http://localhost:$PORT"
-echo "  首次识别会自动下载模型，CPU 模式下请耐心等待"
-echo "========================================"
+echo "  首次识别会自动下载模型，CPU 模式下请耐心等待"echo "========================================"
 
 exec "$VENV_DIR/bin/python" server.py --host "$HOST" --port "$PORT" --device "$DEVICE" --preload
