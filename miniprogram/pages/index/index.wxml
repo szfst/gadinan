@@ -1,0 +1,79 @@
+<view class="page">
+  <view class="header">
+    <text class="title">闽南话语音助手</text>
+    <text class="subtitle">连续对话 · 域名 {{serviceOk ? '已连接' : '未连接'}}</text>
+  </view>
+
+  <view class="card">
+    <view class="toolbar">
+      <text class="status">{{isLoading ? '正在识别并思考…' : statusText}}</text>
+      <button wx:if="{{turns.length}}" class="btn-new" size="mini" bindtap="newConversation">新对话</button>
+    </view>
+
+    <scroll-view wx:if="{{turns.length}}" class="chat-list" scroll-y scroll-into-view="{{'turn-' + turns[turns.length-1].id}}" enhanced show-scrollbar="{{false}}">
+      <block wx:for="{{turns}}" wx:key="id">
+        <view class="turn" id="turn-{{item.id}}">
+          <view class="turn-label">第 {{index + 1}} 轮</view>
+          <view class="bubble user-bubble">
+            <view wx:if="{{item.dialect}}" class="line">
+              <text class="tag">闽南语</text>
+              <text>{{item.dialect}}</text>
+            </view>
+            <view class="line">
+              <text class="tag">普通话</text>
+              <text class="mandarin">{{item.mandarin}}</text>
+            </view>
+          </view>
+          <view class="bubble ai-bubble">
+            <view class="ai-head">
+              <text class="tag">AI 回答</text>
+              <view class="speak-row">
+                <button
+                  class="speak-btn mandarin {{speakingKey === item.id + '-mandarin' ? 'active' : ''}}"
+                  size="mini"
+                  data-text="{{item.answer}}"
+                  data-key="{{item.id}}-mandarin"
+                  data-lang="mandarin"
+                  bindtap="speak"
+                >🔊 普通话</button>
+                <button
+                  class="speak-btn minnan {{speakingKey === item.id + '-minnan' ? 'active' : ''}}"
+                  size="mini"
+                  data-text="{{item.answerMinnan}}"
+                  data-key="{{item.id}}-minnan"
+                  data-lang="minnan"
+                  bindtap="speak"
+                >🔊 闽南语</button>
+              </view>
+            </view>
+            <rich-text class="answer-rich" nodes="{{item.answerHtml}}"></rich-text>
+            <view wx:if="{{item.answerMinnan}}" class="minnan-line">
+              <text class="tag">闽南语版</text>
+              <text>{{item.answerMinnan}}</text>
+            </view>
+          </view>
+        </view>
+      </block>
+    </scroll-view>
+
+    <view wx:elif="{{!isLoading && !isRecording}}" class="hint">
+      <text>按住下方按钮说话，松手自动发送</text>
+      <text class="tip">语速稍慢、环境安静，识别更准</text>
+    </view>
+
+    <view wx:if="{{errorMsg}}" class="error">{{errorMsg}}</view>
+
+    <view class="record-wrap">
+      <button
+        class="record-btn {{isRecording ? 'recording' : ''}} {{isLoading ? 'disabled' : ''}}"
+        disabled="{{isLoading}}"
+        bindtouchstart="onRecordStart"
+        bindtouchend="onRecordEnd"
+        bindtouchcancel="onRecordCancel"
+      >
+        <text class="icon">{{isRecording ? '⏹' : '🎤'}}</text>
+        <text>{{isRecording ? '松开发送 ' + recordSec + 's' : isLoading ? '处理中…' : turns.length ? '按住继续说' : '按住说话'}}</text>
+      </button>
+    </view>
+  </view>
+</view>

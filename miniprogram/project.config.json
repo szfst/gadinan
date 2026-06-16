@@ -1,0 +1,16 @@
+{
+  "description": "闽南话语音助手",
+  "packOptions": { "ignore": [], "include": [] },
+  "setting": {
+    "urlCheck": true,
+    "es6": true,
+    "postcss": true,
+    "minified": true,
+    "newFeature": true
+  },
+  "compileType": "miniprogram",
+  "libVersion": "3.3.4",
+  "appid": "touristappid",
+  "projectname": "gadinan-miniprogram",
+  "condition": {}
+}
