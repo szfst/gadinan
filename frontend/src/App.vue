@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { renderMarkdown, stripMarkdown } from './utils/text.js'
+import { parseApiResponse } from './utils/api.js'
 
 const isRecording = ref(false)
 const isLoading = ref(false)
@@ -163,7 +164,7 @@ async function sendVoiceChat(blob) {
 
   try {
     const res = await fetch('/api/voice-chat', { method: 'POST', body: formData })
-    const data = await res.json()
+    const data = await parseApiResponse(res)
     if (!res.ok) throw new Error(data.detail || '处理失败')
 
     const turn = {
